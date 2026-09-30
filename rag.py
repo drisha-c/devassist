@@ -14,13 +14,13 @@ CHAT_MODEL = os.getenv("GEMINI_MODEL", "gemini-3.5-flash-lite")
 MIN_SCORE = 0.6  # chunks scoring below this are treated as not relevant
 
 
-def load_chunks(folder="docs"):
+def load_doc_chunks(folder="docs"):
+    """Chunk markdown docs by heading. Returns chunks tagged as 'doc'."""
     chunks = []
     for path in Path(folder).glob("*.md"):
         text = path.read_text(encoding="utf-8")
         text = text.replace("\\#", "#")
 
-        # each section starts at a line beginning with "# "
         sections = text.split("\n# ")
         for section in sections:
             section = section.strip()
@@ -32,10 +32,35 @@ def load_chunks(folder="docs"):
             title, _, body = section.partition("\n")
             chunks.append({
                 "source": path.name,
+                "type": "doc",
                 "title": title.strip(),
                 "text": body.strip(),
             })
     return chunks
+
+
+def load_log_chunks(folder="logs", lines_per_chunk=4):
+    """Chunk log files by fixed-size line windows. Returns chunks tagged as 'log'."""
+    chunks = []
+    for path in Path(folder).glob("*.log"):
+        lines = path.read_text(encoding="utf-8").strip().splitlines()
+
+        for i in range(0, len(lines), lines_per_chunk):
+            window = lines[i:i + lines_per_chunk]
+            if not window:
+                continue
+            chunks.append({
+                "source": path.name,
+                "type": "log",
+                "title": f"Log lines {i + 1}-{i + len(window)}",
+                "text": "\n".join(window),
+            })
+    return chunks
+
+
+def load_all_chunks():
+    """Combine chunks from all sources into one list."""
+    return load_doc_chunks() + load_log_chunks()
 
 
 def embed_texts(texts):
@@ -43,7 +68,7 @@ def embed_texts(texts):
     return np.array([e.values for e in result.embeddings])
 
 
-def search(question, chunks, chunk_vectors, top_k=3):
+def search(question, chunks, chunk_vectors, top_k=4):
     q = embed_texts([question])[0]
     scores = chunk_vectors @ q / (
         np.linalg.norm(chunk_vectors, axis=1) * np.linalg.norm(q)
@@ -60,11 +85,13 @@ def answer(question, chunks, vectors):
     if not hits:
         return "I don't know based on the documents I have.", [], 200
 
-    context = "\n\n".join(f"[{c['title']}]\n{c['text']}" for c, _ in hits)
+    context = "\n\n".join(
+        f"[{c['type']}: {c['title']}]\n{c['text']}" for c, _ in hits
+    )
     prompt = (
         "Answer the question using ONLY the context below. "
         "If the context does not contain the answer, say you don't know. "
-        "Keep the answer short.\n\n"
+        "Give a clear, complete answer in 1-3 sentences, don't just say yes or no.\n\n"
         f"Context:\n{context}\n\nQuestion: {question}"
     )
 
@@ -73,9 +100,9 @@ def answer(question, chunks, vectors):
             response = client.models.generate_content(
                 model=CHAT_MODEL, contents=prompt
             )
-            return response.text, [c["title"] for c, _ in hits], 200
+            sources = [f"{c['type']}: {c['title']}" for c, _ in hits]
+            return response.text, sources, 200
         except errors.ClientError:
-            # Daily quota or rate limit hit. Retrying won't help, so fail fast.
             return "Daily quota reached for the AI model. Please try again tomorrow.", [], 429
         except errors.ServerError:
             if attempt == 3:
@@ -84,9 +111,11 @@ def answer(question, chunks, vectors):
 
 
 if __name__ == "__main__":
-    chunks = load_chunks()
+    chunks = load_all_chunks()
     vectors = embed_texts([c["title"] + "\n" + c["text"] for c in chunks])
-    print("Embedded", len(chunks), "chunks")
+    doc_count = sum(1 for c in chunks if c["type"] == "doc")
+    log_count = sum(1 for c in chunks if c["type"] == "log")
+    print(f"Embedded {len(chunks)} chunks ({doc_count} doc, {log_count} log)")
 
     while True:
         question = input("\nAsk a question (or type quit): ")

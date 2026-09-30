@@ -36,3 +36,13 @@ Google sometimes returns a 503 error saying the model is under high demand. The 
 
 The model gemini-2.5-flash was deprecated for new users. The project uses gemini-3.6-flash for answers and gemini-embedding-001 for embeddings.
 
+
+
+
+
+\# Retrieval limitations
+
+
+
+Testing showed that natural language questions about the logs retrieve correctly, for example asking about a rate limit error correctly found the relevant log chunk. However, exact value lookups such as asking what happened at a specific timestamp often fail, because embeddings capture semantic meaning rather than exact literal values like numbers or timestamps. A production system would likely combine semantic search with keyword or structured filtering for this kind of query.
+

@@ -27,7 +27,7 @@ _index = {}
 
 def get_index():
     if "chunks" not in _index:
-        chunks = rag.load_chunks()
+        chunks = rag.load_all_chunks()
         vectors = rag.embed_texts(
             [c["title"] + "\n" + c["text"] for c in chunks]
         )

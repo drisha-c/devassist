@@ -1,0 +1,13 @@
+2026-09-28 03:14:02 INFO Started server process
+2026-09-28 03:14:02 INFO Application startup complete
+2026-09-28 03:15:11 ERROR ServerError 503 UNAVAILABLE model gemini-3.6-flash overloaded, retry attempt 1
+2026-09-28 03:15:13 ERROR ServerError 503 UNAVAILABLE model gemini-3.6-flash overloaded, retry attempt 2
+2026-09-28 03:15:17 WARNING All retries exhausted, returning 503 to client
+2026-09-28 03:22:45 INFO POST /ask-docs 200 OK response_time=812ms
+2026-09-28 03:41:09 ERROR ClientError 429 RESOURCE_EXHAUSTED quota exceeded for gemini-3.6-flash generate_content_free_tier_requests limit=20
+2026-09-28 03:41:09 WARNING Daily quota reached, endpoint returning 429 to client
+2026-09-28 04:02:33 INFO POST /ask-docs 200 OK response_time=640ms
+2026-09-28 04:15:58 ERROR ModuleNotFoundError No module named numpy during Render build
+2026-09-28 04:16:40 INFO Deploy succeeded after adding numpy to requirements.txt
+2026-09-28 05:03:21 WARNING Rate limit exceeded for IP 34.82.114.42, endpoint /ask-docs, limit=5/minute
+2026-09-28 05:10:02 INFO POST /ask 200 OK response_time=430ms
