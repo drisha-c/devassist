@@ -1,4 +1,5 @@
 import os
+import re
 import time
 from pathlib import Path
 
@@ -107,6 +108,60 @@ def answer(question, chunks, vectors):
         except errors.ServerError:
             if attempt == 3:
                 return "The AI model is busy right now. Try again in a minute.", [], 503
+            time.sleep(2 * attempt)
+
+
+def find_latest_error(folder="logs"):
+    """Scan log files for the most recent ERROR line."""
+    error_lines = []
+    for path in Path(folder).glob("*.log"):
+        for line in path.read_text(encoding="utf-8").splitlines():
+            if re.search(r"\bERROR\b", line):
+                error_lines.append(line)
+    if not error_lines:
+        return None
+    return error_lines[-1]  # last one in the file, most recent
+
+
+def suggest_fix(chunks, vectors):
+    """Find the latest error, retrieve context, and ask Gemini to draft a fix."""
+    latest_error = find_latest_error()
+    if not latest_error:
+        return None, "No errors found in the logs.", [], 200
+
+    query = f"How to fix this error: {latest_error}"
+    hits = [
+        (c, s) for c, s in search(query, chunks, vectors, top_k=4)
+        if s >= MIN_SCORE
+    ]
+
+    if not hits:
+        return latest_error, "No relevant context found to suggest a fix.", [], 200
+
+    context = "\n\n".join(
+        f"[{c['type']}: {c['title']}]\n{c['text']}" for c, _ in hits
+    )
+    prompt = (
+        "You are a DevOps assistant. An error was detected in the logs. "
+        "Using ONLY the context below, suggest a short, specific remediation action. "
+        "If the context does not explain how to fix it, say so honestly. "
+        "Keep the suggestion to 2-3 sentences.\n\n"
+        f"Error: {latest_error}\n\n"
+        f"Context:\n{context}"
+    )
+
+    for attempt in range(1, 4):
+        try:
+            response = client.models.generate_content(
+                model=CHAT_MODEL, contents=prompt
+            )
+            sources = [f"{c['type']}: {c['title']}" for c, _ in hits]
+            return latest_error, response.text, sources, 200
+        except errors.ClientError:
+            return latest_error, "Daily quota reached for the AI model.", [], 429
+        except errors.ServerError:
+            if attempt == 3:
+                return latest_error, "The AI model is busy right now.", [], 503
             time.sleep(2 * attempt)
 
 

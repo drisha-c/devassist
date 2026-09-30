@@ -1,4 +1,5 @@
 import time
+import uuid
 from fastapi import FastAPI, HTTPException, Header, Request
 from pydantic import BaseModel
 from google import genai
@@ -23,6 +24,7 @@ app.state.limiter = limiter
 app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
 _index = {}
+_pending_fixes = {}  # in-memory store: fix_id -> suggestion details
 
 
 def get_index():
@@ -88,3 +90,61 @@ def ask_docs(request: Request, payload: Question, x_api_key: str = Header(None))
     if status != 200:
         raise HTTPException(status_code=status, detail=body)
     return body
+
+
+@app.post("/suggest-fix")
+@limiter.limit("5/minute")
+def suggest_fix_endpoint(request: Request, x_api_key: str = Header(None)):
+    check_api_key(x_api_key)
+    chunks, vectors = get_index()
+    result = rag.suggest_fix(chunks, vectors)
+
+    if result[0] is None:
+        # no error found
+        _, message, sources, status = result
+        return {"error_found": False, "message": message}
+
+    error_line, suggestion, sources, status = result
+    if status != 200:
+        raise HTTPException(status_code=status, detail=suggestion)
+
+    fix_id = str(uuid.uuid4())[:8]
+    _pending_fixes[fix_id] = {
+        "error": error_line,
+        "suggestion": suggestion,
+        "sources": sources,
+        "approved": False,
+    }
+
+    return {
+        "fix_id": fix_id,
+        "error_found": True,
+        "error": error_line,
+        "suggestion": suggestion,
+        "sources": sources,
+        "status": "awaiting_approval",
+    }
+
+
+@app.post("/approve-fix/{fix_id}")
+@limiter.limit("5/minute")
+def approve_fix(fix_id: str, request: Request, x_api_key: str = Header(None)):
+    check_api_key(x_api_key)
+
+    fix = _pending_fixes.get(fix_id)
+    if fix is None:
+        raise HTTPException(status_code=404, detail="No pending fix with that ID")
+
+    if fix["approved"]:
+        return {"fix_id": fix_id, "status": "already_approved"}
+
+    fix["approved"] = True
+    # This is a mocked action. A real system would call infrastructure
+    # APIs here (restart a service, roll back a deploy, etc.).
+    action_taken = f"[SIMULATED] Would execute: {fix['suggestion']}"
+
+    return {
+        "fix_id": fix_id,
+        "status": "approved_and_executed",
+        "action_taken": action_taken,
+    }
