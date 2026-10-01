@@ -79,12 +79,14 @@ def search(question, chunks, chunk_vectors, top_k=4):
 
 
 def answer(question, chunks, vectors):
-    hits = [
-        (c, s) for c, s in search(question, chunks, vectors)
-        if s >= MIN_SCORE
-    ]
+    start_time = time.time()
+    all_hits = search(question, chunks, vectors)
+    top_score = all_hits[0][1] if all_hits else 0.0
+    hits = [(c, s) for c, s in all_hits if s >= MIN_SCORE]
+
     if not hits:
-        return "I don't know based on the documents I have.", [], 200
+        elapsed_ms = round((time.time() - start_time) * 1000)
+        return "I don't know based on the documents I have.", [], 200, top_score, elapsed_ms
 
     context = "\n\n".join(
         f"[{c['type']}: {c['title']}]\n{c['text']}" for c, _ in hits
@@ -102,12 +104,15 @@ def answer(question, chunks, vectors):
                 model=CHAT_MODEL, contents=prompt
             )
             sources = [f"{c['type']}: {c['title']}" for c, _ in hits]
-            return response.text, sources, 200
+            elapsed_ms = round((time.time() - start_time) * 1000)
+            return response.text, sources, 200, top_score, elapsed_ms
         except errors.ClientError:
-            return "Daily quota reached for the AI model. Please try again tomorrow.", [], 429
+            elapsed_ms = round((time.time() - start_time) * 1000)
+            return "Daily quota reached for the AI model. Please try again tomorrow.", [], 429, top_score, elapsed_ms
         except errors.ServerError:
             if attempt == 3:
-                return "The AI model is busy right now. Try again in a minute.", [], 503
+                elapsed_ms = round((time.time() - start_time) * 1000)
+                return "The AI model is busy right now. Try again in a minute.", [], 503, top_score, elapsed_ms
             time.sleep(2 * attempt)
 
 
@@ -176,7 +181,7 @@ if __name__ == "__main__":
         question = input("\nAsk a question (or type quit): ")
         if question.strip().lower() == "quit":
             break
-        text, sources, status = answer(question, chunks, vectors)
-        print(f"\n[{status}] {text}")
+        text, sources, status, score, ms = answer(question, chunks, vectors)
+        print(f"\n[{status}] ({ms}ms, top score {score:.3f}) {text}")
         if sources:
             print("Sources:", ", ".join(sources))

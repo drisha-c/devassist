@@ -25,6 +25,7 @@ app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
 _index = {}
 _pending_fixes = {}  # in-memory store: fix_id -> suggestion details
+_request_log = []  # in-memory list of every /ask-docs call, for /stats
 
 
 def get_index():
@@ -81,7 +82,18 @@ def ask(request: Request, payload: Question, x_api_key: str = Header(None)):
 def ask_docs(request: Request, payload: Question, x_api_key: str = Header(None)):
     check_api_key(x_api_key)
     chunks, vectors = get_index()
-    text, sources, status = rag.answer(payload.question, chunks, vectors)
+    text, sources, status, top_score, elapsed_ms = rag.answer(
+        payload.question, chunks, vectors
+    )
+
+    _request_log.append({
+        "question": payload.question,
+        "status": status,
+        "top_score": top_score,
+        "elapsed_ms": elapsed_ms,
+        "grounded": len(sources) > 0,
+    })
+
     body = {
         "question": payload.question,
         "answer": text,
@@ -92,6 +104,26 @@ def ask_docs(request: Request, payload: Question, x_api_key: str = Header(None))
     return body
 
 
+@app.get("/stats")
+def stats():
+    if not _request_log:
+        return {"total_requests": 0, "message": "No requests logged yet"}
+
+    total = len(_request_log)
+    grounded = sum(1 for r in _request_log if r["grounded"])
+    avg_score = sum(r["top_score"] for r in _request_log) / total
+    avg_latency = sum(r["elapsed_ms"] for r in _request_log) / total
+
+    return {
+        "total_requests": total,
+        "grounded_answers": grounded,
+        "unanswered": total - grounded,
+        "average_top_score": round(avg_score, 3),
+        "average_latency_ms": round(avg_latency),
+        "recent_requests": _request_log[-5:],
+    }
+
+
 @app.post("/suggest-fix")
 @limiter.limit("5/minute")
 def suggest_fix_endpoint(request: Request, x_api_key: str = Header(None)):
@@ -100,7 +132,6 @@ def suggest_fix_endpoint(request: Request, x_api_key: str = Header(None)):
     result = rag.suggest_fix(chunks, vectors)
 
     if result[0] is None:
-        # no error found
         _, message, sources, status = result
         return {"error_found": False, "message": message}
 
@@ -139,8 +170,6 @@ def approve_fix(fix_id: str, request: Request, x_api_key: str = Header(None)):
         return {"fix_id": fix_id, "status": "already_approved"}
 
     fix["approved"] = True
-    # This is a mocked action. A real system would call infrastructure
-    # APIs here (restart a service, roll back a deploy, etc.).
     action_taken = f"[SIMULATED] Would execute: {fix['suggestion']}"
 
     return {
