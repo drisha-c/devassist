@@ -161,9 +161,11 @@ def answer(question, chunks, vectors):
             sources = [f"{c['type']}: {c['title']}" for c, _ in hits]
             elapsed_ms = round((time.time() - start_time) * 1000)
             return response.text, sources, 200, top_score, elapsed_ms
-        except errors.ClientError:
+        except errors.ClientError as e:
             elapsed_ms = round((time.time() - start_time) * 1000)
-            return "Daily quota reached for the AI model. Please try again tomorrow.", [], 429, top_score, elapsed_ms
+            if getattr(e, "code", None) == 429:
+                return "Daily quota reached for the AI model. Please try again tomorrow.", [], 429, top_score, elapsed_ms
+            return "The AI model rejected the request. Check the server's API key and model settings.", [], 502, top_score, elapsed_ms
         except errors.ServerError:
             if attempt == 3:
                 elapsed_ms = round((time.time() - start_time) * 1000)
@@ -217,8 +219,10 @@ def suggest_fix(chunks, vectors):
             )
             sources = [f"{c['type']}: {c['title']}" for c, _ in hits]
             return latest_error, response.text, sources, 200
-        except errors.ClientError:
-            return latest_error, "Daily quota reached for the AI model.", [], 429
+        except errors.ClientError as e:
+            if getattr(e, "code", None) == 429:
+                return latest_error, "Daily quota reached for the AI model.", [], 429
+            return latest_error, "The AI model rejected the request. Check the server's API key and model settings.", [], 502
         except errors.ServerError:
             if attempt == 3:
                 return latest_error, "The AI model is busy right now.", [], 503
