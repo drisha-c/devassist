@@ -9,6 +9,7 @@ from slowapi import Limiter, _rate_limit_exceeded_handler
 from slowapi.util import get_remote_address
 from slowapi.errors import RateLimitExceeded
 import os
+import secrets
 
 import rag
 
@@ -40,7 +41,12 @@ def get_index():
 
 
 def check_api_key(x_api_key: str = Header(None)):
-    if x_api_key != API_KEY:
+    if not API_KEY:
+        raise HTTPException(
+            status_code=500,
+            detail="Server misconfigured: DEVASSIST_API_KEY is not set",
+        )
+    if not x_api_key or not secrets.compare_digest(x_api_key, API_KEY):
         raise HTTPException(status_code=401, detail="Invalid or missing API key")
 
 
@@ -75,6 +81,16 @@ def ask(request: Request, payload: Question, x_api_key: str = Header(None)):
                     status_code=503,
                     detail="The AI model is busy right now. Please try again in a minute."
                 )
+        except errors.ClientError as e:
+            if getattr(e, "code", None) == 429:
+                raise HTTPException(
+                    status_code=429,
+                    detail="Daily quota reached for the AI model. Please try again tomorrow.",
+                )
+            raise HTTPException(
+                status_code=502,
+                detail="The AI model rejected the request. Check the server's API key and model settings.",
+            )
 
 
 @app.post("/ask-docs")
