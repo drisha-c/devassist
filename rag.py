@@ -59,9 +59,64 @@ def load_log_chunks(folder="logs", lines_per_chunk=4):
     return chunks
 
 
+def load_code_chunks(files=("main.py", "rag.py")):
+    """Chunk Python files by top-level def/class, keeping decorators attached.
+    The setup code above the first function becomes its own chunk."""
+    chunks = []
+
+    for filename in files:
+        path = Path(filename)
+        if not path.exists():
+            continue
+        lines = path.read_text(encoding="utf-8").splitlines()
+
+        # find each top-level def/class, and pull in decorators directly above it
+        starts = []  # list of (chunk_start_line, def_line)
+        for i, line in enumerate(lines):
+            if line.startswith("def ") or line.startswith("class "):
+                start = i
+                while start > 0 and lines[start - 1].startswith("@"):
+                    start -= 1
+                starts.append((start, i))
+
+        if not starts:
+            continue
+
+        # setup code before the first function (imports, constants, client)
+        preamble = "\n".join(lines[:starts[0][0]]).strip()
+        if preamble:
+            chunks.append({
+                "source": filename,
+                "type": "code",
+                "title": f"{filename} setup and configuration",
+                "text": preamble,
+            })
+
+        for n, (start, def_line) in enumerate(starts):
+            end = starts[n + 1][0] if n + 1 < len(starts) else len(lines)
+            block = "\n".join(lines[start:end]).strip()
+            if not block:
+                continue
+
+            title = lines[def_line].strip().rstrip(":")
+            # if a FastAPI route decorator is attached, put the route in the title
+            for dec in lines[start:def_line]:
+                if dec.startswith("@app."):
+                    title = f"{dec.strip()} {title}"
+                    break
+
+            chunks.append({
+                "source": filename,
+                "type": "code",
+                "title": title,
+                "text": block,
+            })
+    return chunks
+
+
 def load_all_chunks():
     """Combine chunks from all sources into one list."""
-    return load_doc_chunks() + load_log_chunks()
+    return load_doc_chunks() + load_log_chunks() + load_code_chunks()
 
 
 def embed_texts(texts):
@@ -125,7 +180,7 @@ def find_latest_error(folder="logs"):
                 error_lines.append(line)
     if not error_lines:
         return None
-    return error_lines[-1]  # last one in the file, most recent
+    return error_lines[-1]
 
 
 def suggest_fix(chunks, vectors):
@@ -175,7 +230,8 @@ if __name__ == "__main__":
     vectors = embed_texts([c["title"] + "\n" + c["text"] for c in chunks])
     doc_count = sum(1 for c in chunks if c["type"] == "doc")
     log_count = sum(1 for c in chunks if c["type"] == "log")
-    print(f"Embedded {len(chunks)} chunks ({doc_count} doc, {log_count} log)")
+    code_count = sum(1 for c in chunks if c["type"] == "code")
+    print(f"Embedded {len(chunks)} chunks ({doc_count} doc, {log_count} log, {code_count} code)")
 
     while True:
         question = input("\nAsk a question (or type quit): ")
