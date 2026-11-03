@@ -7,6 +7,7 @@ import numpy as np
 from dotenv import load_dotenv
 from google import genai
 from google.genai import errors
+import config
 
 load_dotenv()
 client = genai.Client(api_key=os.getenv("GEMINI_API_KEY"))
@@ -15,7 +16,7 @@ CHAT_MODEL = os.getenv("GEMINI_MODEL", "gemini-3.5-flash-lite")
 MIN_SCORE = 0.6  # chunks scoring below this are treated as not relevant
 
 
-def load_doc_chunks(folder="docs"):
+def load_doc_chunks(folder=config.DOCS_DIR):
     """Chunk markdown docs by heading. Returns chunks tagged as 'doc'."""
     chunks = []
     for path in Path(folder).glob("*.md"):
@@ -40,7 +41,7 @@ def load_doc_chunks(folder="docs"):
     return chunks
 
 
-def load_log_chunks(folder="logs", lines_per_chunk=4):
+def load_log_chunks(folder=config.LOGS_DIR, lines_per_chunk=4):
     """Chunk log files by fixed-size line windows. Returns chunks tagged as 'log'."""
     chunks = []
     for path in Path(folder).glob("*.log"):
@@ -59,13 +60,14 @@ def load_log_chunks(folder="logs", lines_per_chunk=4):
     return chunks
 
 
-def load_code_chunks(files=("main.py", "rag.py")):
+def load_code_chunks(files=config.CODE_FILES):
     """Chunk Python files by top-level def/class, keeping decorators attached.
     The setup code above the first function becomes its own chunk."""
     chunks = []
 
     for filename in files:
         path = Path(filename)
+        filename = path.name
         if not path.exists():
             continue
         lines = path.read_text(encoding="utf-8").splitlines()
@@ -173,7 +175,7 @@ def answer(question, chunks, vectors):
             time.sleep(2 * attempt)
 
 
-def find_latest_error(folder="logs"):
+def find_latest_error(folder=config.LOGS_DIR):
     """Scan log files for the most recent ERROR line."""
     error_lines = []
     for path in Path(folder).glob("*.log"):
